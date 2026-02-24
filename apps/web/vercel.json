@@ -1,5 +1,5 @@
 {
     "buildCommand": "pnpm --filter '@ams-twin/web...' build",
     "installCommand": "pnpm install --filter '@ams-twin/web...'",
-    "outputDirectory": "apps/web/.next"
+    "outputDirectory": ".next"
 }
