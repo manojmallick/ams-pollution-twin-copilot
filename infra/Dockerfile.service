@@ -1,0 +1,20 @@
+FROM node:20-alpine AS base
+RUN npm install -g pnpm
+
+WORKDIR /app
+COPY package.json pnpm-workspace.yaml ./
+COPY packages/ packages/
+COPY services/ services/
+COPY tsconfig.base.json ./
+
+RUN pnpm install --frozen-lockfile
+
+ARG SERVICE
+RUN pnpm --filter "@ams-twin/contracts" build && \
+    pnpm --filter "@ams-twin/rules" build && \
+    pnpm --filter "@ams-twin/shared" build && \
+    pnpm --filter "@ams-twin/${SERVICE}" build
+
+ARG SERVICE
+ENV SERVICE=${SERVICE}
+CMD ["sh", "-c", "node services/${SERVICE}/dist/index.js"]

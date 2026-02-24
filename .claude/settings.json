@@ -1,0 +1,16 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(lsof:*)",
+      "Bash(pnpm --filter @ams-twin/twin build:*)",
+      "Bash(npx tsc:*)",
+      "Bash(ls:*)",
+      "Bash(printenv:*)",
+      "Read(//Users/manojmallick/**)",
+      "Bash(/Users/manojmallick/Documents/ams-pollution-twin-copilot/services/explain/.env.example:*)",
+      "Bash(pnpm --filter @ams-twin/trust build:*)",
+      "WebFetch(domain:greenpt.com)",
+      "WebFetch(domain:docs.greenpt.ai)"
+    ]
+  }
+}

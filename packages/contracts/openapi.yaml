@@ -1,0 +1,365 @@
+openapi: 3.0.3
+info:
+  title: Amsterdam Pollution Twin Copilot API
+  version: 1.0.0
+  description: Validated, auditable urban pollution digital twin for Amsterdam
+servers:
+  - url: http://localhost:3001
+    description: Ingest (local dev)
+  - url: http://localhost:3002
+    description: Twin (local dev)
+  - url: http://localhost:3003
+    description: Trust (local dev)
+  - url: http://localhost:3004
+    description: Audit (local dev)
+  - url: http://localhost:3005
+    description: Explain (local dev)
+
+paths:
+  /v1/ingest/pull:
+    post:
+      summary: Pull latest data from configured sources (demo trigger)
+      tags: [Ingest]
+      responses:
+        "200":
+          description: Pull started
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IngestPullResponse"
+
+  /v1/ingest/status:
+    get:
+      summary: Get last fetch timestamps per source
+      tags: [Ingest]
+      responses:
+        "200":
+          description: Status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IngestStatusResponse"
+
+  /v1/twin/cells:
+    get:
+      summary: Get deterministic twin outputs for geocells in bbox at time
+      tags: [Twin]
+      parameters:
+        - in: query
+          name: bbox
+          required: true
+          schema:
+            type: string
+          description: "minLon,minLat,maxLon,maxLat"
+        - in: query
+          name: time
+          required: true
+          schema:
+            type: string
+            format: date-time
+        - in: query
+          name: stepMinutes
+          schema:
+            type: integer
+            default: 15
+      responses:
+        "200":
+          description: Twin outputs for cells in bbox
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  cells:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/TwinCellOutput"
+                  count:
+                    type: integer
+                  timeUtc:
+                    type: string
+                    format: date-time
+
+  /v1/twin/scenario:
+    post:
+      summary: Run a deterministic scenario simulation
+      tags: [Twin]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ScenarioRequest"
+      responses:
+        "200":
+          description: Scenario results
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ScenarioResponse"
+
+  /v1/trust/validate:
+    post:
+      summary: Validate a twin output and return a signed ValidatedTwinOutput
+      tags: [Trust]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        "200":
+          description: Signed validated output
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ValidatedTwinOutput"
+
+  /v1/trust/payload/{requestId}:
+    get:
+      summary: Retrieve a stored validated payload by requestId
+      tags: [Trust]
+      parameters:
+        - in: path
+          name: requestId
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Validated payload
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ValidatedTwinOutput"
+        "404":
+          description: Not found
+
+  /v1/trust/drift:
+    get:
+      summary: Get drift metrics and trust state
+      tags: [Trust]
+      parameters:
+        - in: query
+          name: region
+          required: true
+          schema:
+            type: string
+            example: Amsterdam
+      responses:
+        "200":
+          description: Drift dashboard data
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DriftResponse"
+
+  /v1/audit/export:
+    post:
+      summary: Export a signed audit PDF snapshot
+      tags: [Audit]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AuditExportRequest"
+      responses:
+        "200":
+          description: PDF file
+          content:
+            application/pdf:
+              schema:
+                type: string
+                format: binary
+
+  /v1/explain:
+    post:
+      summary: Generate grounded explanation (reads only signed payload)
+      tags: [Explain]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ExplainRequest"
+      responses:
+        "200":
+          description: Grounded explanation + footprint
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ExplainResponse"
+
+components:
+  schemas:
+    IngestPullResponse:
+      type: object
+      properties:
+        ok: { type: boolean }
+        startedAtUtc: { type: string, format: date-time }
+      required: [ok, startedAtUtc]
+
+    IngestStatusResponse:
+      type: object
+      properties:
+        sources:
+          type: array
+          items:
+            type: object
+            properties:
+              sourceId: { type: string }
+              lastSeenUtc: { type: string, format: date-time }
+              freshnessMinutes: { type: integer }
+            required: [sourceId, lastSeenUtc, freshnessMinutes]
+      required: [sources]
+
+    ScenarioRequest:
+      type: object
+      properties:
+        region: { type: string, example: Amsterdam }
+        timeUtc: { type: string, format: date-time }
+        cellId: { type: string }
+        levers:
+          type: object
+          properties:
+            trafficMultiplier: { type: number, minimum: 0.5, maximum: 1.2 }
+            zone: { type: string, example: A10-ring }
+          required: [trafficMultiplier, zone]
+      required: [region, timeUtc, cellId, levers]
+
+    ScenarioResponse:
+      type: object
+      properties:
+        requestId: { type: string }
+        baseline: { $ref: "#/components/schemas/TwinCellOutput" }
+        scenario: { $ref: "#/components/schemas/TwinCellOutput" }
+      required: [requestId, baseline, scenario]
+
+    TwinCellOutput:
+      type: object
+      properties:
+        requestId: { type: string }
+        region: { type: string }
+        timeUtc: { type: string, format: date-time }
+        cellId: { type: string }
+        pollutants:
+          type: object
+          additionalProperties:
+            type: object
+            properties:
+              predicted: { type: number }
+              unit: { type: string }
+              psi: { type: integer }
+              pi95: { type: array, items: { type: number } }
+              uncertaintyNorm: { type: number }
+        derived:
+          type: object
+          properties:
+            crs: { type: number }
+            tier: { type: string, enum: [GREEN, AMBER, RED, PURPLE, INFO_ONLY, DATA_GAP] }
+            persistence: { type: number }
+            exposureNorm: { type: number }
+            actionAllowed: { type: boolean }
+            reasonCodes: { type: array, items: { type: string } }
+        actions:
+          type: array
+          items:
+            type: object
+
+    DriftResponse:
+      type: object
+      properties:
+        region: { type: string }
+        trustState: { type: string, enum: [NORMAL, CAUTION, DEGRADED] }
+        rollingError:
+          type: object
+          properties:
+            window: { type: string, example: "24h" }
+            pm25_mae: { type: number }
+            no2_mae: { type: number }
+          required: [window, pm25_mae, no2_mae]
+        psi:
+          type: array
+          items:
+            type: object
+            properties:
+              feature: { type: string }
+              value: { type: number }
+              status: { type: string, enum: [STABLE, MODERATE, HIGH] }
+            required: [feature, value, status]
+      required: [region, trustState, rollingError, psi]
+
+    AuditExportRequest:
+      type: object
+      properties:
+        requestId: { type: string }
+      required: [requestId]
+
+    ExplainRequest:
+      type: object
+      properties:
+        requestId: { type: string }
+        cellId: { type: string }
+        style: { type: string, enum: [CITIZEN, CITY_OPS], default: CITIZEN }
+      required: [requestId, cellId]
+
+    ExplainResponse:
+      type: object
+      properties:
+        ok: { type: boolean }
+        narrative: { type: string }
+        groundedFacts:
+          type: array
+          items:
+            type: object
+            properties:
+              fieldPath: { type: string }
+              value: {}
+            required: [fieldPath, value]
+        greenAiMeter:
+          type: object
+          properties:
+            provider: { type: string }
+            tokensIn: { type: integer }
+            tokensOut: { type: integer }
+            energyWh: { type: number }
+            co2eGrams: { type: number }
+          required: [provider, tokensIn, tokensOut, energyWh, co2eGrams]
+      required: [ok, narrative, groundedFacts, greenAiMeter]
+
+    ValidatedTwinOutput:
+      type: object
+      properties:
+        requestId: { type: string }
+        region: { type: string }
+        timeUtc: { type: string, format: date-time }
+        grid:
+          type: object
+          properties:
+            system: { type: string, enum: [H3] }
+            resolution: { type: integer }
+            cellId: { type: string }
+        pollutants:
+          type: object
+          additionalProperties:
+            type: object
+        derived:
+          type: object
+        trust:
+          type: object
+        evidence:
+          type: object
+        actions:
+          type: array
+          items:
+            type: object
+        signature:
+          type: object
+          properties:
+            alg: { type: string, enum: [Ed25519] }
+            payloadSha256: { type: string }
+            signatureB64: { type: string }
+            publicKeyFingerprint: { type: string }
+      required: [requestId, region, timeUtc, grid, pollutants, derived, trust, evidence, actions, signature]

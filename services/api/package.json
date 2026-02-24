@@ -1,0 +1,30 @@
+{
+    "name": "@ams-twin/api",
+    "version": "1.0.0",
+    "scripts": {
+        "dev": "ts-node-dev --respawn --transpile-only --require dotenv/config src/server.ts",
+        "build": "tsc",
+        "start": "node dist/server.js",
+        "typecheck": "tsc --noEmit"
+    },
+    "dependencies": {
+        "@ams-twin/contracts": "workspace:*",
+        "@ams-twin/rules": "workspace:*",
+        "@ams-twin/shared": "workspace:*",
+        "@fastify/cors": "^9.0.1",
+        "@noble/ed25519": "^2.1.0",
+        "better-sqlite3": "^9.6.0",
+        "fastify": "^4.26.2",
+        "h3-js": "^4.1.0",
+        "openai": "^6.23.0",
+        "pdf-lib": "^1.17.1",
+        "zod": "^3.23.8"
+    },
+    "devDependencies": {
+        "@types/better-sqlite3": "^7.6.10",
+        "@types/node": "^20.14.0",
+        "dotenv": "^17.3.1",
+        "ts-node-dev": "^2.0.0",
+        "typescript": "^5.4.5"
+    }
+}

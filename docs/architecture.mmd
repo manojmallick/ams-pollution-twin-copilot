@@ -1,0 +1,50 @@
+graph TB
+    subgraph Interface["🖥️ Interface Layer"]
+        MAP["Map Dashboard<br/>H3 Cells · Tooltips · Tier Colors"]
+        SCENARIO["Scenario Panel<br/>Traffic Lever (0.5–1.2×) · Compare"]
+        DRIFTUI["Drift Dashboard<br/>Trust Badge · PSI Bar Chart"]
+    end
+
+    subgraph Pipeline["⚙️ Deterministic Pipeline (Services)"]
+        direction LR
+        INGEST["1. Ingest :3001<br/>Luchtmeetnet + Open-Meteo"]
+        TWIN["2. Twin :3002<br/>CRS · PSI · Tier · Actions"]
+        TRUST["3. Trust :3003<br/>Confidence · Drift · Sign"]
+        AUDIT["4. Audit :3004<br/>Signed PDF Export"]
+        EXPLAIN["5. Explain :3005<br/>Grounded Narrative"]
+    end
+
+    subgraph Core["🔒 Deterministic Core (packages/rules)"]
+        RULES["WHO Bands<br/>PSI Lookup Table"]
+        TIERGATE["Tier Classifier<br/>GREEN → PURPLE"]
+        ACTIONGATE["Action Gate<br/>tier=RED/PURPLE + conf≥0.65"]
+        CONFENGINE["Confidence Engine<br/>5-Factor Sensor Score"]
+        DRIFTMON["Drift Monitor<br/>PSI Drift + MAE Tracking"]
+        SIGNER["Ed25519 Signer<br/>SHA-256 + Signature"]
+        GROUNDER["Grounding Validator<br/>Hallucination Blocker"]
+    end
+
+    MAP --> INGEST
+    SCENARIO --> TWIN
+    DRIFTUI --> TRUST
+
+    INGEST -->|"RawObservation"| TWIN
+    TWIN -->|"TwinOutput"| TRUST
+    TRUST -->|"ValidatedTwinOutput (signed)"| AUDIT
+    TRUST -->|"ValidatedTwinOutput (signed)"| EXPLAIN
+
+    RULES -.->|"computePsi()"| TWIN
+    TIERGATE -.->|"classifyTier()"| TWIN
+    ACTIONGATE -.->|"isActionAllowed()"| TWIN
+    CONFENGINE -.->|"sensorConfidence"| TRUST
+    DRIFTMON -.->|"driftState"| TRUST
+    SIGNER -.->|"signPayload()"| TRUST
+    GROUNDER -.->|"validateGrounding()"| EXPLAIN
+
+    style Interface fill:#0a1628,stroke:#0d61aa,color:#e2e8f0
+    style Pipeline fill:#0f2a4a,stroke:#0d61aa,color:#e2e8f0
+    style Core fill:#1a0a28,stroke:#7b2d8b,color:#e2e8f0
+    style SIGNER fill:#00882b,stroke:#00882b,color:#fff
+    style GROUNDER fill:#00882b,stroke:#00882b,color:#fff
+    style DRIFTMON fill:#cc1a1a,stroke:#cc1a1a,color:#fff
+    style ACTIONGATE fill:#e8a000,stroke:#e8a000,color:#000

@@ -1,0 +1,105 @@
+version: '3.9'
+
+services:
+  ingest:
+    build:
+      context: ..
+      dockerfile: infra/Dockerfile.service
+      args:
+        SERVICE: ingest
+    ports:
+      - '3001:3001'
+    environment:
+      PORT: '3001'
+      DATA_DIR: /data
+    volumes:
+      - ingest_data:/data
+    healthcheck:
+      test: ['CMD', 'wget', '-qO-', 'http://localhost:3001/health']
+      interval: 15s
+      timeout: 5s
+      retries: 3
+
+  twin:
+    build:
+      context: ..
+      dockerfile: infra/Dockerfile.service
+      args:
+        SERVICE: twin
+    ports:
+      - '3002:3002'
+    environment:
+      PORT: '3002'
+      INGEST_URL: 'http://ingest:3001'
+    depends_on:
+      ingest:
+        condition: service_healthy
+    healthcheck:
+      test: ['CMD', 'wget', '-qO-', 'http://localhost:3002/health']
+      interval: 15s
+      timeout: 5s
+      retries: 3
+
+  trust:
+    build:
+      context: ..
+      dockerfile: infra/Dockerfile.service
+      args:
+        SERVICE: trust
+    ports:
+      - '3003:3003'
+    environment:
+      PORT: '3003'
+      SIGNING_PRIVATE_KEY: ${SIGNING_PRIVATE_KEY:-}
+    depends_on:
+      twin:
+        condition: service_healthy
+    healthcheck:
+      test: ['CMD', 'wget', '-qO-', 'http://localhost:3003/health']
+      interval: 15s
+      timeout: 5s
+      retries: 3
+
+  audit:
+    build:
+      context: ..
+      dockerfile: infra/Dockerfile.service
+      args:
+        SERVICE: audit
+    ports:
+      - '3004:3004'
+    environment:
+      PORT: '3004'
+      TRUST_URL: 'http://trust:3003'
+    depends_on:
+      trust:
+        condition: service_healthy
+    healthcheck:
+      test: ['CMD', 'wget', '-qO-', 'http://localhost:3004/health']
+      interval: 15s
+      timeout: 5s
+      retries: 3
+
+  explain:
+    build:
+      context: ..
+      dockerfile: infra/Dockerfile.service
+      args:
+        SERVICE: explain
+    ports:
+      - '3005:3005'
+    environment:
+      PORT: '3005'
+      TRUST_URL: 'http://trust:3003'
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+    depends_on:
+      trust:
+        condition: service_healthy
+    healthcheck:
+      test: ['CMD', 'wget', '-qO-', 'http://localhost:3005/health']
+      interval: 15s
+      timeout: 5s
+      retries: 3
+
+volumes:
+  ingest_data:

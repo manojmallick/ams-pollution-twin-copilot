@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.com/schemas/scenarioRequest.schema.json",
+  "title": "ScenarioRequest",
+  "type": "object",
+  "required": ["region", "timeUtc", "cellId", "levers"],
+  "properties": {
+    "region": { "type": "string" },
+    "timeUtc": { "type": "string", "format": "date-time" },
+    "cellId": { "type": "string" },
+    "levers": {
+      "type": "object",
+      "required": ["trafficMultiplier", "zone"],
+      "properties": {
+        "trafficMultiplier": { "type": "number", "minimum": 0.5, "maximum": 1.2 },
+        "zone": { "type": "string", "enum": ["A10-ring"] }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

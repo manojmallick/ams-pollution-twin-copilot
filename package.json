@@ -1,0 +1,25 @@
+{
+  "name": "ams-pollution-twin-copilot",
+  "private": true,
+  "version": "1.0.0",
+  "packageManager": "pnpm@9.4.0",
+  "workspaces": [
+    "apps/*",
+    "services/api",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "pnpm --parallel --filter './services/api' --filter './apps/*' dev",
+    "build": "pnpm --filter './packages/*' build && pnpm --filter './services/api' --filter './apps/*' build",
+    "lint": "pnpm --recursive lint",
+    "test": "pnpm --recursive test",
+    "typecheck": "pnpm --recursive typecheck"
+  },
+  "devDependencies": {
+    "@typescript-eslint/eslint-plugin": "^7.0.0",
+    "@typescript-eslint/parser": "^7.0.0",
+    "eslint": "^8.57.0",
+    "prettier": "^3.2.5",
+    "typescript": "^5.4.5"
+  }
+}
