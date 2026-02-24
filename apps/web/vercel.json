@@ -1,5 +1,6 @@
 {
-    "buildCommand": "pnpm --filter '@ams-twin/web...' build",
-    "installCommand": "pnpm install --filter '@ams-twin/web...'",
-    "outputDirectory": ".next"
+  "framework": "nextjs",
+  "buildCommand": "pnpm run build",
+  "installCommand": "pnpm install --filter '@ams-twin/web...' --ignore-scripts",
+  "outputDirectory": ".next"
 }
