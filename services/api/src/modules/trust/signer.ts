@@ -1,39 +1,58 @@
-import { createHash, sign, verify, generateKeyPairSync } from 'crypto';
+import { createHash, randomBytes } from 'crypto';
+import * as ed from '@noble/ed25519';
 import type { Signature } from '@ams-twin/contracts';
 
-let privateKeyPem: string;
-let publicKeyPem: string;
+// @noble/ed25519 v2 requires sha512Sync to be wired up.
+// We use Node's built-in crypto so no extra package is needed.
+ed.etc.sha512Sync = (...messages: Uint8Array[]) => {
+  const hash = createHash('sha512');
+  for (const m of messages) hash.update(m);
+  return new Uint8Array(hash.digest());
+};
+
+let privateKeyBytes: Uint8Array;
+let publicKeyBytes: Uint8Array;
 let publicKeyFingerprint: string;
 
+function generateEphemeral() {
+  privateKeyBytes = randomBytes(32);
+  publicKeyBytes = ed.getPublicKey(privateKeyBytes);
+  publicKeyFingerprint = createHash('sha256').update(publicKeyBytes).digest('hex').slice(0, 32);
+  console.warn('[trust] Using ephemeral Ed25519 key — set SIGNING_PRIVATE_KEY env (64-char hex seed) for persistence');
+}
+
 function ensureKeys() {
-  if (privateKeyPem) return;
+  if (privateKeyBytes) return;
 
   const envKey = process.env.SIGNING_PRIVATE_KEY;
   if (envKey) {
-    privateKeyPem = envKey;
-    publicKeyFingerprint = createHash('sha256').update(envKey).digest('hex').slice(0, 32);
-    return;
+    const stripped = envKey.replace(/\s+/g, '');
+
+    // Support 64-char hex (32-byte seed) format only
+    if (/^[0-9a-fA-F]{64}$/.test(stripped)) {
+      privateKeyBytes = Buffer.from(stripped, 'hex');
+      publicKeyBytes = ed.getPublicKey(privateKeyBytes);
+      publicKeyFingerprint = createHash('sha256').update(publicKeyBytes).digest('hex').slice(0, 32);
+      console.log('[trust] Loaded Ed25519 key from SIGNING_PRIVATE_KEY env');
+      return;
+    }
+
+    // Legacy PEM or unknown format — warn and fall back to ephemeral
+    console.warn('[trust] SIGNING_PRIVATE_KEY is not a 64-char hex seed — ignoring and using ephemeral key');
   }
 
-  // Dev: generate ephemeral Ed25519 key pair (changes on restart — fine for demo)
-  const { privateKey: pk, publicKey: pubk } = generateKeyPairSync('ed25519', {
-    privateKeyEncoding: { type: 'pkcs8', format: 'pem' },
-    publicKeyEncoding: { type: 'spki', format: 'pem' },
-  });
-  privateKeyPem = pk;
-  publicKeyPem = pubk;
-  publicKeyFingerprint = createHash('sha256').update(pubk).digest('hex').slice(0, 32);
-  console.warn('[trust] Using ephemeral Ed25519 key — set SIGNING_PRIVATE_KEY env for persistence');
+  generateEphemeral();
 }
 
 export function signPayload(canonicalJson: string): Signature {
   ensureKeys();
 
   const payloadSha256 = createHash('sha256').update(canonicalJson).digest('hex');
+  const msgBytes = Buffer.from(canonicalJson);
 
-  // Ed25519 signing: pass null as digest algorithm (Ed25519 hashes internally)
-  const signatureBuffer = sign(null, Buffer.from(canonicalJson), privateKeyPem);
-  const signatureB64 = signatureBuffer.toString('base64');
+  // Pure-JS Ed25519 signing — no OpenSSL required
+  const sigBytes = ed.sign(msgBytes, privateKeyBytes);
+  const signatureB64 = Buffer.from(sigBytes).toString('base64');
 
   return {
     alg: 'Ed25519',
@@ -46,9 +65,10 @@ export function signPayload(canonicalJson: string): Signature {
 export function verifySignature(canonicalJson: string, signature: Signature): boolean {
   try {
     ensureKeys();
-    if (!publicKeyPem) return false;
-    const sigBuffer = Buffer.from(signature.signatureB64, 'base64');
-    return verify(null, Buffer.from(canonicalJson), publicKeyPem, sigBuffer);
+    if (!publicKeyBytes) return false;
+    const sigBytes = Buffer.from(signature.signatureB64, 'base64');
+    const msgBytes = Buffer.from(canonicalJson);
+    return ed.verify(sigBytes, msgBytes, publicKeyBytes);
   } catch {
     return false;
   }

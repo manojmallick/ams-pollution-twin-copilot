@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from 'react';
 import { getTwinCells, validatePayload } from '@/lib/api';
 import { TIER_COLORS, crsToColor } from '@/lib/colors';
 import { CellTooltip } from './CellTooltip';
+import { cellToLatLng } from 'h3-js';
 
 // Netherlands bbox + center
 const NL_BBOX = '3.36,50.75,7.23,53.55';
@@ -269,9 +270,7 @@ function parseCellCoords(cellId: string): { lat: number; lon: number } | null {
   const m = cellId.match(/FAKE_H3_(-?\d+\.\d+)_(-?\d+\.\d+)/);
   if (m) return { lat: parseFloat(m[1]), lon: parseFloat(m[2]) };
   try {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports, @typescript-eslint/no-var-requires
-    const h3 = require('h3-js');
-    const [lat, lon] = h3.cellToLatLng(cellId);
+    const [lat, lon] = cellToLatLng(cellId);
     return { lat, lon };
   } catch {
     return null;
