@@ -251,7 +251,8 @@ app.post('/v1/explain', async (request: FastifyRequest, reply: FastifyReply) => 
         return ExplainResponseSchema.parse({ ok: true, ...explanation });
     } catch (err) {
         app.log.error(err, '[explain] error:');
-        return reply.status(500).send({ error: 'Explanation generation failed' });
+        const msg = err instanceof Error ? err.message : String(err);
+        return reply.status(500).send({ error: 'Explanation generation failed', details: msg });
     }
 });
 
