@@ -1,26 +1,31 @@
 graph TB
-    subgraph Interface["🖥️ Interface Layer"]
-        MAP["Map Dashboard<br/>H3 Cells · Tooltips · Tier Colors"]
+    subgraph Interface["🖥️ Interface Layer (Vercel)"]
+        MAP["Map Dashboard<br/>H3 Cells · h3-js · Tier Colors"]
         SCENARIO["Scenario Panel<br/>Traffic Lever (0.5–1.2×) · Compare"]
         DRIFTUI["Drift Dashboard<br/>Trust Badge · PSI Bar Chart"]
     end
 
-    subgraph Pipeline["⚙️ Deterministic Pipeline (Services)"]
+    subgraph API["⚙️ Monolith Fastify API (Fly.io :8080)"]
         direction LR
-        INGEST["1. Ingest :3001<br/>Luchtmeetnet + Open-Meteo"]
-        TWIN["2. Twin :3002<br/>CRS · PSI · Tier · Actions"]
-        TRUST["3. Trust :3003<br/>Confidence · Drift · Sign"]
-        AUDIT["4. Audit :3004<br/>Signed PDF Export"]
-        EXPLAIN["5. Explain :3005<br/>Grounded Narrative"]
+        INGEST["Ingest Module<br/>Luchtmeetnet + Open-Meteo"]
+        TWIN["Twin Module<br/>CRS · PSI · Tier · Actions"]
+        TRUST["Trust Module<br/>Confidence · Drift · Sign"]
+        AUDIT["Audit Module<br/>Signed PDF Export"]
+        EXPLAIN["Explain Module<br/>Grounded Narrative (GreenPT)"]
     end
 
-    subgraph Core["🔒 Deterministic Core (packages/rules)"]
+    subgraph Store["💾 Persistence (.data/)"]
+        TRUSTDB["trust.db<br/>SQLite WAL<br/>ValidatedTwinOutput by requestId"]
+        INGESTDB["ingest.db<br/>SQLite WAL<br/>RawObservation[]"]
+    end
+
+    subgraph Core["🔒 Deterministic Core (packages/)"]
         RULES["WHO Bands<br/>PSI Lookup Table"]
         TIERGATE["Tier Classifier<br/>GREEN → PURPLE"]
         ACTIONGATE["Action Gate<br/>tier=RED/PURPLE + conf≥0.65"]
         CONFENGINE["Confidence Engine<br/>5-Factor Sensor Score"]
         DRIFTMON["Drift Monitor<br/>PSI Drift + MAE Tracking"]
-        SIGNER["Ed25519 Signer<br/>SHA-256 + Signature"]
+        SIGNER["@noble/ed25519 Signer<br/>SHA-256 + Ed25519 (pure JS)"]
         GROUNDER["Grounding Validator<br/>Hallucination Blocker"]
     end
 
@@ -33,6 +38,11 @@ graph TB
     TRUST -->|"ValidatedTwinOutput (signed)"| AUDIT
     TRUST -->|"ValidatedTwinOutput (signed)"| EXPLAIN
 
+    TRUST -->|"storeValidatedPayload()"| TRUSTDB
+    AUDIT -->|"getValidatedPayload()"| TRUSTDB
+    EXPLAIN -->|"getValidatedPayload()"| TRUSTDB
+    INGEST -->|"saveObservations()"| INGESTDB
+
     RULES -.->|"computePsi()"| TWIN
     TIERGATE -.->|"classifyTier()"| TWIN
     ACTIONGATE -.->|"isActionAllowed()"| TWIN
@@ -42,9 +52,12 @@ graph TB
     GROUNDER -.->|"validateGrounding()"| EXPLAIN
 
     style Interface fill:#0a1628,stroke:#0d61aa,color:#e2e8f0
-    style Pipeline fill:#0f2a4a,stroke:#0d61aa,color:#e2e8f0
+    style API fill:#0f2a4a,stroke:#0d61aa,color:#e2e8f0
+    style Store fill:#0a1a0a,stroke:#009900,color:#e2e8f0
     style Core fill:#1a0a28,stroke:#7b2d8b,color:#e2e8f0
     style SIGNER fill:#00882b,stroke:#00882b,color:#fff
     style GROUNDER fill:#00882b,stroke:#00882b,color:#fff
     style DRIFTMON fill:#cc1a1a,stroke:#cc1a1a,color:#fff
     style ACTIONGATE fill:#e8a000,stroke:#e8a000,color:#000
+    style TRUSTDB fill:#003300,stroke:#009900,color:#e2e8f0
+    style INGESTDB fill:#003300,stroke:#009900,color:#e2e8f0

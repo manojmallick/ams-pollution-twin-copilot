@@ -63,30 +63,37 @@ Amsterdam Pollution Twin is a **deterministic-first digital twin** where every n
 
 ## 🏗 Architecture
 
+> **Monolith since v2.** All five pipeline modules (ingest, twin, trust, audit, explain) run inside a single **Fastify TypeScript** process deployed to **Fly.io**. The frontend is a **Next.js 14** app on **Vercel**.
+
 ```mermaid
 graph TB
-    subgraph Interface["🖥️ Interface Layer"]
-        MAP["Map Dashboard<br/>H3 Cells · Tooltips · Tier Colors"]
+    subgraph Interface["🖥️ Interface Layer (Vercel)"]
+        MAP["Map Dashboard<br/>H3 Cells · h3-js · Tier Colors"]
         SCENARIO["Scenario Panel<br/>Traffic Lever (0.5–1.2×) · Compare"]
         DRIFTUI["Drift Dashboard<br/>Trust Badge · PSI Bar Chart"]
     end
 
-    subgraph Pipeline["⚙️ Deterministic Pipeline (Services)"]
+    subgraph API["⚙️ Monolith Fastify API (Fly.io :8080)"]
         direction LR
-        INGEST["1. Ingest :3001<br/>Luchtmeetnet + Open-Meteo"]
-        TWIN["2. Twin :3002<br/>CRS · PSI · Tier · Actions"]
-        TRUST["3. Trust :3003<br/>Confidence · Drift · Sign"]
-        AUDIT["4. Audit :3004<br/>Signed PDF Export"]
-        EXPLAIN["5. Explain :3005<br/>Grounded Narrative"]
+        INGEST["Ingest Module<br/>Luchtmeetnet + Open-Meteo"]
+        TWIN["Twin Module<br/>CRS · PSI · Tier · Actions"]
+        TRUST["Trust Module<br/>Confidence · Drift · Sign"]
+        AUDIT["Audit Module<br/>Signed PDF Export"]
+        EXPLAIN["Explain Module<br/>Grounded Narrative (GreenPT)"]
     end
 
-    subgraph Core["🔒 Deterministic Core (packages/rules)"]
+    subgraph Store["💾 Persistence (.data/)"]
+        TRUSTDB["trust.db<br/>SQLite WAL<br/>ValidatedTwinOutput by requestId"]
+        INGESTDB["ingest.db<br/>SQLite WAL<br/>RawObservation[]"]
+    end
+
+    subgraph Core["🔒 Deterministic Core (packages/)"]
         RULES["WHO Bands<br/>PSI Lookup Table"]
         TIERGATE["Tier Classifier<br/>GREEN → PURPLE"]
         ACTIONGATE["Action Gate<br/>tier=RED/PURPLE + conf≥0.65"]
         CONFENGINE["Confidence Engine<br/>5-Factor Sensor Score"]
         DRIFTMON["Drift Monitor<br/>PSI Drift + MAE Tracking"]
-        SIGNER["Ed25519 Signer<br/>SHA-256 + Signature"]
+        SIGNER["@noble/ed25519 Signer<br/>SHA-256 + Ed25519 (pure JS)"]
         GROUNDER["Grounding Validator<br/>Hallucination Blocker"]
     end
 
@@ -99,6 +106,11 @@ graph TB
     TRUST -->|"ValidatedTwinOutput (signed)"| AUDIT
     TRUST -->|"ValidatedTwinOutput (signed)"| EXPLAIN
 
+    TRUST -->|"storeValidatedPayload()"| TRUSTDB
+    AUDIT -->|"getValidatedPayload()"| TRUSTDB
+    EXPLAIN -->|"getValidatedPayload()"| TRUSTDB
+    INGEST -->|"saveObservations()"| INGESTDB
+
     RULES -.->|"computePsi()"| TWIN
     TIERGATE -.->|"classifyTier()"| TWIN
     ACTIONGATE -.->|"isActionAllowed()"| TWIN
@@ -108,12 +120,15 @@ graph TB
     GROUNDER -.->|"validateGrounding()"| EXPLAIN
 
     style Interface fill:#0a1628,stroke:#0d61aa,color:#e2e8f0
-    style Pipeline fill:#0f2a4a,stroke:#0d61aa,color:#e2e8f0
+    style API fill:#0f2a4a,stroke:#0d61aa,color:#e2e8f0
+    style Store fill:#0a1a0a,stroke:#009900,color:#e2e8f0
     style Core fill:#1a0a28,stroke:#7b2d8b,color:#e2e8f0
     style SIGNER fill:#00882b,stroke:#00882b,color:#fff
     style GROUNDER fill:#00882b,stroke:#00882b,color:#fff
     style DRIFTMON fill:#cc1a1a,stroke:#cc1a1a,color:#fff
     style ACTIONGATE fill:#e8a000,stroke:#e8a000,color:#000
+    style TRUSTDB fill:#003300,stroke:#009900,color:#e2e8f0
+    style INGESTDB fill:#003300,stroke:#009900,color:#e2e8f0
 ```
 
 ---
@@ -173,26 +188,36 @@ sensorConfidence =
 
 ### 3. Ed25519 Cryptographic Signing
 
-Every validated output is signed before reaching the UI, explainer, or PDF:
+Every validated output is signed before reaching the UI, explainer, or PDF. We use **`@noble/ed25519`** (pure JavaScript — no OpenSSL dependency) to avoid `ERR_OSSL_UNSUPPORTED` errors on Node 20 + OpenSSL 3.x in production:
 
 ```typescript
-// services/trust/src/signer.ts
+// services/api/src/modules/trust/signer.ts
+import * as ed from '@noble/ed25519';
+import { createHash } from 'crypto';
+
+// Wire up sha512 using Node's built-in crypto (no extra package needed)
+ed.etc.sha512Sync = (...msgs) => {
+  const h = createHash('sha512');
+  for (const m of msgs) h.update(m);
+  return new Uint8Array(h.digest());
+};
+
 export function signPayload(canonicalJson: string): Signature {
   const payloadSha256 = createHash('sha256').update(canonicalJson).digest('hex');
-  const signer = createSign('SHA256');
-  signer.update(canonicalJson);
+  const msgBytes = new TextEncoder().encode(canonicalJson);
+  const sigBytes = ed.sign(msgBytes, privKeyBytes);
   return {
     alg: 'Ed25519',
     payloadSha256,
-    signatureB64: signer.sign(privateKey, 'base64'),
+    signatureB64: Buffer.from(sigBytes).toString('base64'),
     publicKeyFingerprint,
   };
 }
 ```
 
-Dev mode auto-generates an ephemeral key with a warning. Production: set `SIGNING_PRIVATE_KEY` env var.
+`SIGNING_PRIVATE_KEY` must be a **64-character hex string** (32-byte seed). If an old PEM value is detected, the server logs a warning and falls back to an ephemeral key. Set via `fly secrets set` in production.
 
-📁 [services/trust/src/signer.ts](./services/trust/src/signer.ts)
+📁 [services/api/src/modules/trust/signer.ts](./services/api/src/modules/trust/signer.ts)
 
 ### 4. PSI Drift Monitor
 
@@ -279,11 +304,11 @@ Ingest → Twin Engine → Trust/Validate → (Audit PDF | AI Explainer)
 
 | Step | What It Does | Key Output |
 |---|---|---|
-| **1. Ingest** | Fetch Luchtmeetnet stations + Open-Meteo weather; synthetic fallback if API down | `RawObservation[]` persisted to SQLite |
+| **1. Ingest** | Fetch Luchtmeetnet stations + Open-Meteo weather; synthetic fallback if API down | `RawObservation[]` persisted to `.data/ingest.db` (SQLite WAL) |
 | **2. Twin Engine** | Apply WHO bands → PSI per pollutant → CRS → tier → action eligibility | `TwinOutput` with uncertainty bands |
-| **3. Trust / Validate** | 5-factor confidence + drift monitor + action gate + Ed25519 sign | `ValidatedTwinOutput` (immutable, signed) |
-| **4. Audit PDF** | Fetch signed payload from trust store, render pdf-lib document | `audit_{requestId}.pdf` with embedded verification |
-| **5. Explain** | Load signed payload, build grounded context, call GreenPT Mistral Small, validate output | Narrative + `groundedFacts[]` + Green AI Meter |
+| **3. Trust / Validate** | 5-factor confidence + drift monitor + action gate + `@noble/ed25519` sign | `ValidatedTwinOutput` persisted to `.data/trust.db` (SQLite WAL) |
+| **4. Audit PDF** | Fetch signed payload from `trust.db` by `requestId`, render pdf-lib document | `audit_{requestId}.pdf` with embedded verification |
+| **5. Explain** | Load signed payload from `trust.db`, build grounded context, call GreenPT Mistral Small, validate output | Narrative + `groundedFacts[]` + Green AI Meter |
 
 Each step only reads the output of the previous step. The AI **never touches** raw sensor data, PSI tables, or the rules engine.
 
@@ -342,46 +367,56 @@ Missing data renders as `DATA_GAP` (gray cells, confidence near zero, actions lo
 ### Quick Start
 
 ```bash
-git clone https://github.com/your-org/ams-pollution-twin-copilot.git
+git clone https://github.com/manojmallick/ams-pollution-twin-copilot.git
 cd ams-pollution-twin-copilot
 pnpm install
 ```
 
-Run all services (six terminals or use a process manager):
+Start everything with a single command from the monorepo root:
 
 ```bash
-cd services/ingest  && pnpm dev   # Sensor ingest     → :3001
-cd services/twin    && pnpm dev   # Twin engine       → :3002
-cd services/trust   && pnpm dev   # Trust + signing   → :3003
-cd services/audit   && pnpm dev   # PDF export        → :3004
-cd services/explain && pnpm dev   # AI explainer      → :3005
-cd apps/web         && pnpm dev   # Next.js dashboard → :3000
+pnpm dev           # API (Fastify) → :8080 + Next.js dashboard → :3000
+```
+
+Or start them individually:
+
+```bash
+pnpm --filter './services/api' dev   # Monolith API  → :8080
+pnpm --filter './apps/web' dev       # Next.js UI    → :3000
 ```
 
 Open: **http://localhost:3000**
 
 ### Environment Configuration
 
-```bash
-cp infra/.env.example .env
-```
+Create `services/api/.env`:
 
 ```env
-# Ed25519 signing key (auto-generated ephemeral key in dev if not set)
-SIGNING_PRIVATE_KEY=
+# Ed25519 signing key — must be a 64-char hex string (32-byte seed)
+# Leave unset for auto-generated ephemeral key (dev only)
+SIGNING_PRIVATE_KEY=<64-char hex>
 
-# GreenPT API key — optional. Without it, explain service uses deterministic templates
-GREENPT_API_KEY=
-
-# SQLite data directory for ingest service
-DATA_DIR=.data
+# GreenPT API key — optional. Without it, explain uses deterministic templates
+GREENPT_API_KEY=sk-...
 ```
 
-### Docker (all services)
+### Production Deployment
+
+**API → Fly.io** (from monorepo root):
 
 ```bash
-cd infra && docker compose up
+fly deploy --config services/api/fly.toml --dockerfile services/api/Dockerfile --remote-only
 ```
+
+**Secrets** (set once):
+
+```bash
+fly secrets set SIGNING_PRIVATE_KEY=<64-char hex> GREENPT_API_KEY=sk-...
+```
+
+**Frontend → Vercel** — push to `main`, Vercel auto-deploys.
+
+> **Note:** `.dockerignore` at the monorepo root excludes `node_modules` so `better-sqlite3` and all native addons are recompiled natively for Linux inside the build container.
 
 ---
 
@@ -439,29 +474,30 @@ ams-pollution-twin-copilot/
 │               ├── api.ts          # Typed fetch wrappers for all 5 services
 │               └── colors.ts       # Tier/drift color constants
 ├── services/
-│   ├── ingest/                     # :3001 — Sensor connectors + SQLite store
-│   │   └── src/
-│   │       ├── connectors/
-│   │       │   ├── airQuality.ts   # Luchtmeetnet API + synthetic fallback
-│   │       │   └── weather.ts      # Open-Meteo current conditions
-│   │       └── store.ts            # better-sqlite3 persistence
-│   ├── twin/                       # :3002 — Deterministic CRS engine
-│   │   └── src/
-│   │       ├── engine.ts           # PSI → CRS → tier → actions formula
-│   │       └── h3utils.ts          # H3 geocell helpers + Amsterdam grid
-│   ├── trust/                      # :3003 — Confidence + drift + signing
-│   │   └── src/
-│   │       ├── confidence.ts       # 5-factor sensor confidence formula
-│   │       ├── drift.ts            # PSI drift monitor + rolling MAE
-│   │       ├── signer.ts           # Ed25519 sign/verify
-│   │       └── store.ts            # In-memory payload store (by requestId)
-│   ├── audit/                      # :3004 — Signed PDF export
-│   │   └── src/
-│   │       └── pdfGenerator.ts     # pdf-lib A4 document with 8 sections
-│   └── explain/                    # :3005 — AI explainer + grounding
-│       └── src/
-│           ├── greenpt.ts          # GreenPT Mistral Small call + templated fallback
-│           └── grounder.ts         # Fact extraction + novel-number detector
+│   └── api/                        # Monolith Fastify API → Fly.io :8080
+│       ├── src/
+│       │   ├── server.ts           # Route definitions for all 5 modules
+│       │   └── modules/
+│       │       ├── ingest/
+│       │       │   ├── connectors/
+│       │       │   │   ├── airQuality.ts   # Luchtmeetnet API + synthetic fallback
+│       │       │   │   └── weather.ts      # Open-Meteo current conditions
+│       │       │   └── store.ts    # better-sqlite3 → .data/ingest.db
+│       │       ├── twin/
+│       │       │   ├── engine.ts   # PSI → CRS → tier → actions formula
+│       │       │   └── h3utils.ts  # H3 geocell helpers + Netherlands grid
+│       │       ├── trust/
+│       │       │   ├── confidence.ts  # 5-factor sensor confidence
+│       │       │   ├── drift.ts       # PSI drift monitor + rolling MAE
+│       │       │   ├── signer.ts      # @noble/ed25519 sign/verify (pure JS)
+│       │       │   └── store.ts       # better-sqlite3 → .data/trust.db (WAL)
+│       │       ├── audit/
+│       │       │   └── pdfGenerator.ts  # pdf-lib A4 document with 8 sections
+│       │       └── explain/
+│       │           ├── greenpt.ts   # GreenPT Mistral Small + templated fallback
+│       │           └── grounder.ts  # Fact extraction + novel-number detector
+│       ├── Dockerfile              # Alpine Node 20, excludes node_modules via .dockerignore
+│       └── fly.toml                # Fly.io config (build context = monorepo root)
 ├── packages/
 │   ├── contracts/                  # Zod schemas + TypeScript types + OpenAPI
 │   │   ├── src/index.ts            # All runtime schemas (ValidatedTwinOutput etc.)
@@ -471,13 +507,11 @@ ams-pollution-twin-copilot/
 │   │   └── src/index.ts            # computePsi, classifyTier, isActionAllowed
 │   └── shared/                     # Utils: sha256, generateRequestId, clamp
 ├── docs/
+│   ├── architecture.mmd            # Current Mermaid architecture diagram
 │   ├── TRUST_MODEL.md              # Confidence formula + drift thresholds
 │   ├── THREAT_MODEL.md             # 10 threat scenarios + mitigations
 │   └── WHAT_WE_COMPUTE_VS_GENERATE.md # Deterministic vs AI table
-└── infra/
-    ├── docker-compose.yml          # All 5 services orchestrated
-    ├── Dockerfile.service          # Multi-stage build for any service
-    └── .env.example                # Required environment variables
+└── .dockerignore                   # Excludes node_modules from Docker build context
 ```
 
 ---
