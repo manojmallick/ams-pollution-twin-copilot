@@ -1,0 +1,16 @@
+# Exclude local node_modules so the container rebuilds native addons for linux
+node_modules
+**/node_modules
+
+# Build artifacts
+**/dist
+**/.next
+
+# Local data and secrets
+.data
+**/.env
+**/.env.*
+
+# OS / editor noise
+.DS_Store
+**/.DS_Store
