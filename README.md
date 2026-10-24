@@ -455,6 +455,18 @@ fly secrets set SIGNING_PRIVATE_KEY=<64-char hex> GREENPT_API_KEY=sk-...
 
 ---
 
+## Workspace scripts
+
+The repo is a pnpm workspace. From the root:
+
+| Command | What it does |
+|---|---|
+| `pnpm dev` | Run the API and the apps in parallel |
+| `pnpm build` | Build the shared packages, then the API and apps |
+| `pnpm lint` | Lint every package |
+| `pnpm typecheck` | Type-check every package |
+| `pnpm test` | Run every package's tests |
+
 ## 📁 Project Structure
 
 ```
